@@ -1,0 +1,109 @@
+# ============================================================================
+# Wine Classifier — Kubernetes Deployment
+# ============================================================================
+# Init container downloads the latest model from GCS before the
+# serving container starts. Model is shared via an emptyDir volume.
+#
+# Replace these placeholders before deploying:
+#   REGISTRY_URL  — from terraform output docker_registry_url
+#   IMAGE_TAG     — git SHA or "latest"
+#   MODELS_BUCKET — from terraform output models_bucket
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wine-classifier
+  namespace: serving
+  labels:
+    app: wine-classifier
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: wine-classifier
+  template:
+    metadata:
+      labels:
+        app: wine-classifier
+      annotations:
+        # Prometheus auto-discovery
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Using default compute SA (node-level) for GCS access.
+      # In production, use Workload Identity with a dedicated SA
+      # (see terraform/iam.tf for the upgrade path).
+
+      # --- Init container: download model from GCS ---
+      initContainers:
+        - name: model-loader
+          image: google/cloud-sdk:slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              BUCKET="${MODELS_BUCKET}"
+              DEST="/models"
+              mkdir -p "$DEST"
+
+              echo "Reading latest model version..."
+              gcloud storage cat "gs://${BUCKET}/wine-classifier/latest.json" > /tmp/latest.json
+              VERSION=$(cat /tmp/latest.json | python3 -c "import sys,json; print(json.load(sys.stdin)['version'])")
+              echo "Downloading model version: ${VERSION}"
+
+              gcloud storage cp "gs://${BUCKET}/wine-classifier/${VERSION}/model.joblib" "${DEST}/model.joblib"
+              gcloud storage cp "gs://${BUCKET}/wine-classifier/${VERSION}/baseline.json" "${DEST}/baseline.json" || echo "No baseline found, skipping"
+              gcloud storage cp "gs://${BUCKET}/wine-classifier/${VERSION}/metadata.json" "${DEST}/metadata.json" || echo "No metadata found, skipping"
+
+              echo "Done. Files in ${DEST}:"
+              ls -la "${DEST}/"
+          env:
+            - name: MODELS_BUCKET
+              value: "MODELS_BUCKET_PLACEHOLDER"
+          volumeMounts:
+            - name: model-volume
+              mountPath: /models
+
+      # --- Serving container ---
+      containers:
+        - name: model-server
+          image: REGISTRY_URL_PLACEHOLDER/model-server:IMAGE_TAG_PLACEHOLDER
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: MODEL_PATH
+              value: "/models/model.joblib"
+            - name: BASELINE_PATH
+              value: "/models/baseline.json"
+          volumeMounts:
+            - name: model-volume
+              mountPath: /models
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 2
+
+      volumes:
+        - name: model-volume
+          emptyDir: {}

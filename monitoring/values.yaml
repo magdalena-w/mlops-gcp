@@ -1,0 +1,62 @@
+# ============================================================================
+# kube-prometheus-stack — Helm values for dev environment
+# ============================================================================
+# Minimal config that fits on 1-3 small GKE nodes.
+# Production would add: persistent volumes, ingress, alerting receivers,
+# resource limits tuned to actual load, retention policies.
+# ============================================================================
+
+# --- Prometheus ---
+prometheus:
+  prometheusSpec:
+    # Keep 7 days of metrics (dev only — production would use remote write)
+    retention: 7d
+    # Minimal resources for dev cluster
+    resources:
+      requests:
+        cpu: 100m
+        memory: 400Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    # Scrape ALL PodMonitors and ServiceMonitors regardless of label selector.
+    # Default behavior requires matching labels — this is simpler for dev.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    # No persistent storage — metrics are ephemeral in dev.
+    # Production: use a StatefulSet with PVC.
+
+# --- Grafana ---
+grafana:
+  # Simple admin password for dev — change for production
+  adminPassword: "admin"
+  # Minimal resources
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  # Persistence off for dev
+  persistence:
+    enabled: false
+  # Default datasource is Prometheus (auto-configured by the chart)
+  # Dashboards are provisioned from ConfigMaps — see dashboards/ folder
+
+# --- AlertManager ---
+# Disabled for dev — we're not setting up PagerDuty/Slack receivers yet
+alertmanager:
+  enabled: false
+
+# --- Node Exporter, kube-state-metrics ---
+# Keep defaults — they provide cluster-level metrics for free
+
+# --- Disable things we don't need ---
+defaultRules:
+  create: true
+  # Disable rules for components we don't run
+  rules:
+    etcd: false
+    kubeScheduler: false
+    kubeControllerManager: false

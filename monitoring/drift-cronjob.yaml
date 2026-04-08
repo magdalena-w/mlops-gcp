@@ -1,0 +1,76 @@
+# ============================================================================
+# Drift Detector CronJob
+# ============================================================================
+# Runs every 15 minutes:
+#   1. Init container downloads the current baseline.json from GCS
+#   2. Main container queries Prometheus for live feature distributions
+#   3. Computes drift scores and pushes them to Pushgateway
+#
+# Placeholders to substitute before applying:
+#   MODELS_BUCKET_PLACEHOLDER — from terraform output models_bucket
+# ============================================================================
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: feature-drift-detector
+  namespace: monitoring
+spec:
+  schedule: "*/15 * * * *"  # Every 15 minutes
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          initContainers:
+            - name: baseline-loader
+              image: google/cloud-sdk:slim
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  BUCKET="${MODELS_BUCKET}"
+                  echo "Reading latest model version..."
+                  gcloud storage cat "gs://${BUCKET}/wine-classifier/latest.json" > /tmp/latest.json
+                  VERSION=$(cat /tmp/latest.json | python3 -c "import sys,json; print(json.load(sys.stdin)['version'])")
+                  echo "Downloading baseline from version: ${VERSION}"
+                  gcloud storage cp "gs://${BUCKET}/wine-classifier/${VERSION}/baseline.json" /baseline/baseline.json
+                  ls -la /baseline/
+              env:
+                - name: MODELS_BUCKET
+                  value: "MODELS_BUCKET_PLACEHOLDER"
+              volumeMounts:
+                - name: baseline
+                  mountPath: /baseline
+          containers:
+            - name: drift-detector
+              image: python:3.10-slim
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  pip install --quiet --no-cache-dir urllib3
+                  python /scripts/drift_detector.py
+              env:
+                - name: PROMETHEUS_URL
+                  value: "http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
+                - name: PUSHGATEWAY_URL
+                  value: "http://pushgateway-prometheus-pushgateway.monitoring.svc.cluster.local:9091"
+                - name: BASELINE_PATH
+                  value: "/baseline/baseline.json"
+              volumeMounts:
+                - name: baseline
+                  mountPath: /baseline
+                  readOnly: true
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: baseline
+              emptyDir: {}
+            - name: script
+              configMap:
+                name: drift-detector-script
+                defaultMode: 0755

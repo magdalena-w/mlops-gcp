@@ -1,0 +1,101 @@
+# ============================================================================
+# Build & Deploy Model Server
+# ============================================================================
+# Triggers on changes to serving/ directory:
+#   1. Builds the Docker image for linux/amd64
+#   2. Pushes to Artifact Registry with commit SHA tag
+#   3. Updates the GKE deployment to use the new image
+#
+# Authentication mode (WIF vs SA key) controlled by vars.AUTH_MODE
+# ============================================================================
+
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "serving/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+env:
+  GCP_REGION: "europe-central2"
+  GKE_CLUSTER: "mlops-cluster"
+  GKE_ZONE: "europe-central2-a"
+  IMAGE_NAME: "model-server"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --- Authentication ---
+      - name: Authenticate to GCP (WIF)
+        if: vars.AUTH_MODE == 'wif'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Authenticate to GCP (Service Account Key)
+        if: vars.AUTH_MODE != 'wif'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: "gke-gcloud-auth-plugin"
+
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set image tag
+        id: tag
+        run: echo "tag=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: serving/
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_ZONE }}
+
+      - name: Update deployment image
+        run: |
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
+          kubectl set image deployment/wine-classifier \
+            model-server="$IMAGE" \
+            -n serving
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/wine-classifier -n serving --timeout=3m
+
+      - name: Post-deploy status
+        run: |
+          kubectl get pods -n serving -l app=wine-classifier
+          kubectl get deployment wine-classifier -n serving -o jsonpath='{.spec.template.spec.containers[0].image}'
+          echo ""

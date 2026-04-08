@@ -1,0 +1,31 @@
+# ============================================================================
+# PodMonitor — Prometheus scrape config for Wine Classifier pods
+# ============================================================================
+# PodMonitor is a Prometheus Operator CRD installed by kube-prometheus-stack.
+# It tells Prometheus which pods to scrape and on what endpoint.
+#
+# This is the Prometheus Operator way — instead of editing Prometheus
+# config directly, you create PodMonitor/ServiceMonitor CRDs and the
+# operator reconciles them into the Prometheus config automatically.
+# ============================================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: wine-classifier
+  namespace: monitoring
+  labels:
+    release: monitoring # Some chart versions filter by this label
+spec:
+  # Look for pods in the serving namespace
+  namespaceSelector:
+    matchNames:
+      - serving
+  selector:
+    matchLabels:
+      app: wine-classifier
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

@@ -1,0 +1,108 @@
+# ============================================================================
+# Retrain Model
+# ============================================================================
+# Triggers the Vertex AI training pipeline when:
+#   - Changes are pushed to pipelines/ or data/
+#   - Manually triggered via workflow_dispatch
+#
+# AUTHENTICATION — this workflow supports two modes:
+#   1. Workload Identity Federation (preferred, keyless)
+#      Requires secrets: WIF_PROVIDER, WIF_SERVICE_ACCOUNT
+#   2. Service Account Key (fallback for org-restricted projects)
+#      Requires secret: GCP_SA_KEY (JSON key content)
+#
+# Set AUTH_MODE in repo variables: "wif" or "key"
+# ============================================================================
+
+name: Retrain Model
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pipelines/**"
+      - "scripts/generate_dataset.py"
+      - ".github/workflows/retrain.yml"
+  workflow_dispatch:
+    inputs:
+      n_estimators:
+        description: "Number of trees"
+        default: "100"
+        type: string
+      max_depth:
+        description: "Max tree depth"
+        default: "5"
+        type: string
+      accuracy_threshold:
+        description: "Minimum test accuracy to register model"
+        default: "0.85"
+        type: string
+
+env:
+  PYTHON_VERSION: "3.10"
+  GCP_REGION: "europe-central2"
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --- Authentication (choose ONE mode via repo variable) ---
+      - name: Authenticate to GCP (WIF)
+        if: vars.AUTH_MODE == 'wif'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Authenticate to GCP (Service Account Key)
+        if: vars.AUTH_MODE != 'wif'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install kfp==2.7.0 google-cloud-aiplatform==1.42.1 google-cloud-storage==2.14.0 \
+                      scikit-learn==1.3.2 pandas==2.1.4
+
+      - name: Regenerate and upload dataset
+        run: |
+          python scripts/generate_dataset.py
+          gcloud storage cp data/wine_data.csv \
+            "gs://${{ vars.GCP_PROJECT_ID }}-mlops-data/raw/wine_data.csv"
+
+      - name: Run training pipeline
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GOOGLE_CLOUD_REGION: ${{ env.GCP_REGION }}
+        run: |
+          python -m pipelines.run \
+            --data-bucket "${{ vars.GCP_PROJECT_ID }}-mlops-data" \
+            --model-bucket "${{ vars.GCP_PROJECT_ID }}-mlops-models" \
+            --pipeline-bucket "${{ vars.GCP_PROJECT_ID }}-mlops-pipeline-artifacts" \
+            --n-estimators "${{ inputs.n_estimators || '100' }}" \
+            --max-depth "${{ inputs.max_depth || '5' }}" \
+            --threshold "${{ inputs.accuracy_threshold || '0.85' }}" \
+            --no-cache
+
+      - name: Pipeline submitted
+        run: |
+          echo "Pipeline submitted to Vertex AI."
+          echo "Monitor at: https://console.cloud.google.com/vertex-ai/pipelines/runs?project=${{ vars.GCP_PROJECT_ID }}"
