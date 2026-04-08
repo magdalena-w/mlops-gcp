@@ -86,17 +86,17 @@ jobs:
         run: |
           python scripts/generate_dataset.py
           gcloud storage cp data/wine_data.csv \
-            "gs://${{ vars.GCP_PROJECT_ID }}-mlops-data/raw/wine_data.csv"
+            "gs://${{ secrets.GCP_PROJECT_ID }}-mlops-data/raw/wine_data.csv"
 
       - name: Run training pipeline
         env:
-          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
           GOOGLE_CLOUD_REGION: ${{ env.GCP_REGION }}
         run: |
           python -m pipelines.run \
-            --data-bucket "${{ vars.GCP_PROJECT_ID }}-mlops-data" \
-            --model-bucket "${{ vars.GCP_PROJECT_ID }}-mlops-models" \
-            --pipeline-bucket "${{ vars.GCP_PROJECT_ID }}-mlops-pipeline-artifacts" \
+            --data-bucket "${{ secrets.GCP_PROJECT_ID }}-mlops-data" \
+            --model-bucket "${{ secrets.GCP_PROJECT_ID }}-mlops-models" \
+            --pipeline-bucket "${{ secrets.GCP_PROJECT_ID }}-mlops-pipeline-artifacts" \
             --n-estimators "${{ inputs.n_estimators || '100' }}" \
             --max-depth "${{ inputs.max_depth || '5' }}" \
             --threshold "${{ inputs.accuracy_threshold || '0.85' }}" \
@@ -105,4 +105,4 @@ jobs:
       - name: Pipeline submitted
         run: |
           echo "Pipeline submitted to Vertex AI."
-          echo "Monitor at: https://console.cloud.google.com/vertex-ai/pipelines/runs?project=${{ vars.GCP_PROJECT_ID }}"
+          echo "Monitor at: https://console.cloud.google.com/vertex-ai/pipelines/runs?project=${{ secrets.GCP_PROJECT_ID }}"

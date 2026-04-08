@@ -72,8 +72,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:latest
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -85,7 +85,7 @@ jobs:
 
       - name: Update deployment image
         run: |
-          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mlops-containers/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
           kubectl set image deployment/wine-classifier \
             model-server="$IMAGE" \
             -n serving
