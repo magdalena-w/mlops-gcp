@@ -188,4 +188,3 @@ async def predict(request: PredictRequest):
 async def metrics():
     """Prometheus metrics endpoint."""
     return PlainTextResponse(generate_latest(), media_type="text/plain; version=0.0.4")
-Wed Apr  8 22:33:40 CEST 2026
