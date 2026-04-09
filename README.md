@@ -10,7 +10,7 @@ End-to-end ML infrastructure on Google Cloud Platform: training pipeline, produc
 
 - **Vertex AI Pipeline orchestration** with KFP v2 (typed artifacts, conditional registration, component containerization)
 - **Model versioning and lineage** — every model links back to its training data, metrics, and git SHA
-- **Quality gating** — models below the accuracy threshold are rejected at pipeline time, never reach production
+- **Quality gating** — models must pass accuracy, per-class recall, and ROC-AUC thresholds before registration (see [METRICS.md](./METRICS.md))
 - **GKE serving** with FastAPI, init-container model loading, HPA autoscaling, and Prometheus metrics
 - **Drift detection** — feature baselines captured during training, compared against live traffic via a CronJob that pushes z-scores to Prometheus Pushgateway
 - **Full observability stack** — `kube-prometheus-stack`, custom Grafana dashboards, PodMonitor auto-discovery
@@ -256,7 +256,7 @@ See `.github/workflows/README.md` for GitHub Actions setup. Two auth modes:
 | Autoscaling | HPA on CPU (2→10 pods, target 70%) | Simple, proven, easy to demo |
 | Monitoring | kube-prometheus-stack + custom dashboards | Standard Prometheus Operator pattern |
 | Drift detection | CronJob → Pushgateway → Prometheus | Lightweight, no extra infra |
-| Region | europe-central2 (Warsaw) | Closest to target employer (ING NL/PL) |
+| Region | europe-central2 (Warsaw) | Closest to target |
 | CI/CD | GitHub Actions with dual auth modes | WIF preferred, SA key as fallback |
 | Terraform state | GCS backend with versioning | Remote state, drift protection |
 
