@@ -17,6 +17,7 @@ End-to-end ML infrastructure on Google Cloud Platform: training pipeline, produc
 - **CI/CD via GitHub Actions** — push-to-retrain on `pipelines/` changes, push-to-deploy on `serving/` changes
 - **Infrastructure-as-Code** — everything Terraformed, reproducible from zero, costs nothing when torn down
 - **Cost-aware design** — spot nodes, lifecycle policies, zonal cluster, bucket retention rules
+- **Defined SLIs/SLOs** — availability, latency, and model-quality objectives with burn-rate alerting (see [SLO.md](./SLO.md))
 
 ---
 

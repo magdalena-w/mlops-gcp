@@ -54,8 +54,14 @@ PREDICTION_LATENCY = Histogram(
 
 PREDICTIONS_TOTAL = Counter(
     "predictions_total",
-    "Total number of predictions",
+    "Total number of successful predictions",
     ["class_label"],
+)
+
+PREDICTION_ERRORS = Counter(
+    "prediction_errors_total",
+    "Total number of failed prediction requests",
+    ["error_type"],  # model_not_loaded, invalid_input, internal
 )
 
 INPUT_FEATURE = Histogram(
@@ -142,6 +148,7 @@ async def health():
 async def predict(request: PredictRequest):
     """Run inference on input features."""
     if model is None:
+        PREDICTION_ERRORS.labels(error_type="model_not_loaded").inc()
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     start = time.perf_counter()
@@ -151,30 +158,38 @@ async def predict(request: PredictRequest):
         try:
             X = np.array([[request.features[name] for name in FEATURE_NAMES]])
         except KeyError as e:
+            PREDICTION_ERRORS.labels(error_type="invalid_input").inc()
             raise HTTPException(status_code=422, detail=f"Missing feature: {e}")
     elif request.data:
         if len(request.data) != len(FEATURE_NAMES):
+            PREDICTION_ERRORS.labels(error_type="invalid_input").inc()
             raise HTTPException(
                 status_code=422,
                 detail=f"Expected {len(FEATURE_NAMES)} features, got {len(request.data)}",
             )
         X = np.array([request.data])
     else:
+        PREDICTION_ERRORS.labels(error_type="invalid_input").inc()
         raise HTTPException(status_code=422, detail="Provide 'features' dict or 'data' array")
 
-    # Track input feature distributions (for drift detection via Prometheus)
-    for i, name in enumerate(FEATURE_NAMES):
-        INPUT_FEATURE.labels(feature_name=name).observe(float(X[0][i]))
+    try:
+        # Track input feature distributions (for drift detection via Prometheus)
+        for i, name in enumerate(FEATURE_NAMES):
+            INPUT_FEATURE.labels(feature_name=name).observe(float(X[0][i]))
 
-    # Predict
-    prediction = int(model.predict(X)[0])
-    probabilities = model.predict_proba(X)[0]
+        # Predict
+        prediction = int(model.predict(X)[0])
+        probabilities = model.predict_proba(X)[0]
 
-    # Track prediction counts per class
-    PREDICTIONS_TOTAL.labels(class_label=CLASS_NAMES[prediction]).inc()
+        # Track prediction counts per class
+        PREDICTIONS_TOTAL.labels(class_label=CLASS_NAMES[prediction]).inc()
 
-    latency = time.perf_counter() - start
-    PREDICTION_LATENCY.observe(latency)
+        latency = time.perf_counter() - start
+        PREDICTION_LATENCY.observe(latency)
+    except Exception as e:
+        PREDICTION_ERRORS.labels(error_type="internal").inc()
+        logger.exception("Prediction failed")
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
     return PredictResponse(
         prediction=prediction,
